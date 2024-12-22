@@ -21,17 +21,10 @@ class _FolderListScreenState extends State<FolderListScreen> {
 
   /// Request necessary permissions for accessing external storage
   Future<void> _requestPermissions() async {
-    // Check for Manage External Storage permission
-    if (await Permission.manageExternalStorage.isGranted ||
-        await Permission.storage.isGranted) {
-      return; // Permission already granted
-    }
+    if (await Permission.storage.isGranted) return;
+    if (await Permission.manageExternalStorage.request().isGranted) return;
 
-    // Request permissions dynamically
-    final result = await Permission.manageExternalStorage.request();
-    if (!result.isGranted) {
-      throw Exception("Storage permission not granted.");
-    }
+    throw Exception("Storage permissions are required to proceed.");
   }
 
   /// Fetch video folders from external storage
@@ -45,8 +38,9 @@ class _FolderListScreenState extends State<FolderListScreen> {
       // Request permissions
       await _requestPermissions();
 
-      // Attempt to list video folders
-      final List<Directory> folders = await _getVideoFolders();
+      // Fetch video folders
+      final List<Directory> folders =
+          await _findVideoFolders(Directory('/storage/emulated/0/'));
 
       setState(() {
         videoFolders = folders;
@@ -60,20 +54,53 @@ class _FolderListScreenState extends State<FolderListScreen> {
     }
   }
 
-  /// Dummy method to simulate fetching video folders
-  /// Replace with actual implementation to list folders with video files
-  Future<List<Directory>> _getVideoFolders() async {
-    // Example: Fetch folders under /storage/emulated/0/
-    final rootDir = Directory('/storage/emulated/0/');
+  /// Recursively find video folders in the given directory
+  Future<List<Directory>> _findVideoFolders(Directory rootDir) async {
+    List<Directory> result = [];
     if (!await rootDir.exists()) {
       throw Exception('Root directory does not exist.');
     }
 
-    return rootDir
-        .listSync()
-        .whereType<Directory>()
-        .where((dir) => dir.path.contains("Videos") || dir.path.contains("Movies"))
-        .toList();
+    final entities = rootDir.listSync(recursive: false, followLinks: false);
+
+    for (var entity in entities) {
+      if (entity is Directory) {
+        // Skip restricted directories
+        if (entity.path.contains('/Android/data') ||
+            entity.path.contains('/Android/obb')) {
+          continue;
+        }
+
+        final containsVideo = await _containsVideoFiles(entity);
+        if (containsVideo) {
+          result.add(entity);
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /// Check if a directory contains video files
+  Future<bool> _containsVideoFiles(Directory dir) async {
+    try {
+      final files = dir.listSync();
+      for (var file in files) {
+        if (file is File && _isVideoFile(file.path)) {
+          return true;
+        }
+      }
+    } catch (e) {
+      // Handle restricted access errors gracefully
+    }
+    return false;
+  }
+
+  /// Check if a file is a video file based on its extension
+  bool _isVideoFile(String filePath) {
+    final videoExtensions = ['mp4', 'mkv', 'avi', 'mov','VID'];
+    final extension = filePath.split('.').last.toLowerCase();
+    return videoExtensions.contains(extension);
   }
 
   @override
@@ -105,7 +132,6 @@ class _FolderListScreenState extends State<FolderListScreen> {
                             style: TextStyle(fontWeight: FontWeight.bold),
                           ),
                           onTap: () {
-                            // Navigate to VideoListScreen (optional)
                             Navigator.push(
                               context,
                               MaterialPageRoute(
@@ -120,5 +146,3 @@ class _FolderListScreenState extends State<FolderListScreen> {
     );
   }
 }
-
-
